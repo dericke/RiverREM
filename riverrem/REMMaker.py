@@ -1,23 +1,26 @@
 #!/usr/bin/env python
 import os
 import sys
+
 sys.path.append("../")
+import logging
+import time
+from itertools import combinations
+
 import numpy as np
-from osgeo import gdal
-from osgeo import osr
-from osgeo import ogr
-from shapely.geometry import box  # for cropping centerlines to extent of DEM
-from geopandas import clip, read_file
 import osmnx  # for querying OpenStreetMaps data to get river centerlines
 import requests
-from scipy.spatial import KDTree as KDTree  # for finding nearest neighbors/interpolating
-from itertools import combinations
-import time
+from geopandas import clip, read_file
+from osgeo import gdal, ogr, osr
+from scipy.spatial import (
+    KDTree as KDTree,  # for finding nearest neighbors/interpolating
+)
+from shapely.geometry import box  # for cropping centerlines to extent of DEM
+
 from riverrem.RasterViz import RasterViz
-import logging
 
 level = logging.INFO
-fmt = '[%(levelname)s] %(asctime)s - %(message)s'
+fmt = "[%(levelname)s] %(asctime)s - %(message)s"
 logging.basicConfig(level=level, format=fmt)
 
 start = time.time()
@@ -73,18 +76,20 @@ def print_usage():
     print(usage)
     return
 
+
 def clear_osm_cache():
     """Clear the OSM cache folder (./.osm_cache). This is useful if the OSM Editor has been used to update
     river centerlines."""
-    print('Clearing OSM cache.')
+    print("Clearing OSM cache.")
     try:
-        for dir, subdirs, files in os.walk('./.osm_cache'):
+        for dir, subdirs, files in os.walk("./.osm_cache"):
             for f in files:
                 filepath = os.path.join(dir, f)
                 os.remove(filepath)
     except Exception as e:
         raise Exception("Could not clear ./.osm_cache.", e)
     return
+
 
 class REMMaker(object):
     """
@@ -113,10 +118,20 @@ class REMMaker(object):
     :type cache_dir: str
 
     """
-    def __init__(self, dem, centerline_shp=None, out_dir='./',
-                 interp_pts=1000, k=None, eps=0.1, workers=4, cache_dir='./.cache'):
+
+    def __init__(
+        self,
+        dem,
+        centerline_shp=None,
+        out_dir="./",
+        interp_pts=1000,
+        k=None,
+        eps=0.1,
+        workers=4,
+        cache_dir="./.cache",
+    ):
         self.dem = dem
-        self.dem_name = os.path.basename(dem).split('.')[0]
+        self.dem_name = os.path.basename(dem).split(".")[0]
         self.centerline_shp = centerline_shp
         self.out_dir = out_dir
         self.cache_dir = cache_dir
@@ -156,7 +171,9 @@ class REMMaker(object):
     def centerline_shp(self, centerline_shp):
         if centerline_shp is not None:
             if not self.valid_input(centerline_shp):
-                raise FileNotFoundError(f"Cannot find input river centerline shapefile: {centerline_shp}")
+                raise FileNotFoundError(
+                    f"Cannot find input river centerline shapefile: {centerline_shp}"
+                )
         self._centerline_shp = centerline_shp
 
     @property
@@ -190,8 +207,8 @@ class REMMaker(object):
         logging.info("Getting DEM projection.")
         r = gdal.Open(self.dem, gdal.GA_ReadOnly)
         self.proj = osr.SpatialReference(wkt=r.GetProjection())
-        self.epsg_code = self.proj.GetAttrValue('AUTHORITY', 1)
-        self.h_unit = self.proj.GetAttrValue('UNIT')
+        self.epsg_code = self.proj.GetAttrValue("AUTHORITY", 1)
+        self.h_unit = self.proj.GetAttrValue("UNIT")
         if self.epsg_code is None or self.h_unit is None:
             raise IOError("ERROR: CRS metadata is missing from the input DEM.")
         logging.info("Reading DEM as array.")
@@ -200,7 +217,9 @@ class REMMaker(object):
         # ensure that nodata values become np.nans in array
         self.nodata_val = band.GetNoDataValue()
         if self.nodata_val:
-            self.dem_array = np.where(self.dem_array == self.nodata_val, np.nan, self.dem_array)
+            self.dem_array = np.where(
+                self.dem_array == self.nodata_val, np.nan, self.dem_array
+            )
         rows, cols = self.dem_array.shape
         # get extent of DEM (used to crop/set extent for centerline shapefile/raster)
         logging.info("Getting DEM bounds.")
@@ -221,33 +240,45 @@ class REMMaker(object):
         self.bbox = [ul_lat, lr_lat, lr_long, ul_long]
         # function for mapping indices to x, y coords
         logging.info("Mapping array indices to coordinates.")
-        self.ix2coords = lambda t: np.column_stack(np.array([t[0] * x_size + upper_left_x + (x_size / 2),
-                                                             t[1] * y_size + upper_left_y + (y_size / 2)]))
+        self.ix2coords = lambda t: np.column_stack(
+            np.array(
+                [
+                    t[0] * x_size + upper_left_x + (x_size / 2),
+                    t[1] * y_size + upper_left_y + (y_size / 2),
+                ]
+            )
+        )
         return
 
     def get_river_centerline(self):
         """Find centerline of river(s) within DEM area using OSM Ways"""
         logging.info("Finding river centerline.")
         # get OSM Ways within bbox of DEM (returns geopandas geodataframe)
-        osmnx.settings.cache_folder = './.osm_cache'
-        self.rivers = osmnx.geometries_from_bbox(*self.bbox, tags={'waterway': ['river', 'stream', 'tidal channel']})
+        osmnx.settings.cache_folder = "./.osm_cache"
+        self.rivers = osmnx.geometries_from_bbox(
+            *self.bbox, tags={"waterway": ["river", "stream", "tidal channel"]}
+        )
         if len(self.rivers) == 0:
-            raise Exception("No rivers found within the DEM domain. Ensure the target river is on OpenStreetMap\n"
-                            "and contains \"waterway\" and \"name\" tags: https://www.openstreetmap.org/edit")
+            raise Exception(
+                "No rivers found within the DEM domain. Ensure the target river is on OpenStreetMap\n"
+                'and contains "waterway" and "name" tags: https://www.openstreetmap.org/edit'
+            )
         # read into geodataframe with same CRS as DEM
         self.rivers = self.rivers.to_crs(epsg=self.epsg_code)
         # crop to DEM extent
         self.rivers = clip(self.rivers, box(*self.extent))
         # get river names (drop ones without a name)
-        self.rivers = self.rivers.dropna(subset=['name'])
+        self.rivers = self.rivers.dropna(subset=["name"])
         names = self.rivers.name.values
         # make name attribute more distinct to avoid conflict with geometry name attribute
-        self.rivers['river_name'] = names
+        self.rivers["river_name"] = names
         # get unique names
         river_names = set(names)
         if len(river_names) == 0:
-            raise Exception("Found river, but it does not have a listed name. Ensure the target river segment(s) "
-                            "have a \"name\" tag: \n\thttps://www.openstreetmap.org/edit")
+            raise Exception(
+                "Found river, but it does not have a listed name. Ensure the target river segment(s) "
+                'have a "name" tag: \n\thttps://www.openstreetmap.org/edit'
+            )
         logging.info(f"Found river(s): {', '.join(river_names)}")
         # find river with greatest length (sum of all segments with same name)
         logging.info("\nRiver lengths:")
@@ -263,8 +294,10 @@ class REMMaker(object):
         # if river length is shorter than geometric mean of DEM dimensions, print warning
         x_min, y_min, x_max, y_max = self.extent
         if self.river_length < np.sqrt((x_max - x_min) * (y_max - y_min)):
-            print("WARNING: River length is shorter than DEM length. Ensure the target river is on OpenStreetMap\n"
-                  "and contains \"waterway\" and \"name\" tags: https://www.openstreetmap.org/edit")
+            print(
+                "WARNING: River length is shorter than DEM length. Ensure the target river is on OpenStreetMap\n"
+                'and contains "waterway" and "name" tags: https://www.openstreetmap.org/edit'
+            )
         # only keep longest river to make REM
         self.rivers = self.rivers[self.rivers.river_name == longest_river]
         # convert linestrings of river to points
@@ -283,27 +316,32 @@ class REMMaker(object):
             point_num = int(point_fraction * self.interp_pts)
             distances = np.linspace(0, line_string.length, point_num)
             self.river_pts.extend([line_string.interpolate(d) for d in distances])
-            self.river_endpts.extend([line_string.interpolate(0), line_string.interpolate(line_string.length)])
+            self.river_endpts.extend(
+                [
+                    line_string.interpolate(0),
+                    line_string.interpolate(line_string.length),
+                ]
+            )
         return
 
     def make_river_shp(self):
         """Make points along river centerline into a shapefile"""
         # create points shapefile
         logging.info("Making river points shapefile.")
-        self.river_shp = os.path.join(self.out_dir, f'{self.dem_name}_river_pts.shp')
-        driver = ogr.GetDriverByName('Esri Shapefile')
+        self.river_shp = os.path.join(self.out_dir, f"{self.dem_name}_river_pts.shp")
+        driver = ogr.GetDriverByName("Esri Shapefile")
         ds = driver.CreateDataSource(self.river_shp)
         # create empty multiline geometry layer
-        layer = ds.CreateLayer('', self.proj, ogr.wkbPoint)
+        layer = ds.CreateLayer("", self.proj, ogr.wkbPoint)
         # Add fields
-        layer.CreateField(ogr.FieldDefn('id', ogr.OFTInteger))
+        layer.CreateField(ogr.FieldDefn("id", ogr.OFTInteger))
         defn = layer.GetLayerDefn()
         # populate layer with a feature for each natural waterway geometrye
         for p in self.river_pts:
             # Create a new feature (attribute and geometry)
             feat = ogr.Feature(defn)
             # set feature attributes
-            feat.SetField('id', 1)
+            feat.SetField("id", 1)
             # set feature geometry from Shapely object
             geom = ogr.CreateGeometryFromWkb(p.wkb)
             feat.SetGeometry(geom)
@@ -316,7 +354,7 @@ class REMMaker(object):
 
     def read_centerline_input(self):
         """Read user provided centerline shapefile instead of using OSM."""
-        logging.info('Using input centerline shapefile.')
+        logging.info("Using input centerline shapefile.")
         self.rivers = read_file(self.centerline_shp).to_crs(epsg=self.epsg_code)
         self.rivers = clip(self.rivers, box(*self.extent))
         self.river_length = self.rivers.length.sum()
@@ -327,15 +365,21 @@ class REMMaker(object):
         """Get DEM values along river centerline"""
         logging.info("Getting river elevation at DEM pixels.")
         # gdal_rasterize centerline
-        self.centerline_ras = os.path.join(self.cache_dir, f"{self.dem_name}_centerline.tif")
+        self.centerline_ras = os.path.join(
+            self.cache_dir, f"{self.dem_name}_centerline.tif"
+        )
         extent = f"-te {' '.join(map(str, self.extent))}"
         res = f"-tr {self.cell_w} {self.cell_h}"
-        gdal.Rasterize(self.centerline_ras, self.river_shp, options=f"-a id {extent} {res}")
+        gdal.Rasterize(
+            self.centerline_ras, self.river_shp, options=f"-a id {extent} {res}"
+        )
         # raster to numpy array same shape as DEM
         r = gdal.Open(self.centerline_ras, gdal.GA_ReadOnly)
         self.centerline_array = r.GetRasterBand(1).ReadAsArray()
         # remove cells where DEM is null
-        self.centerline_array = np.where(np.isnan(self.dem_array), np.nan, self.centerline_array)
+        self.centerline_array = np.where(
+            np.isnan(self.dem_array), np.nan, self.centerline_array
+        )
         # get coordinates and DEM elevation at river pixels
         self.river_indices = np.where(self.centerline_array == 1)
         self.river_coords = self.ix2coords(self.river_indices)
@@ -344,7 +388,9 @@ class REMMaker(object):
 
     def get_sinuosity(self):
         """Estimate sinuosity of the river using river centerline(s) length / distance between line endpoints"""
-        straight_dist = max([p1.distance(p2) for p1, p2 in combinations(self.river_endpts, 2)])
+        straight_dist = max(
+            [p1.distance(p2) for p1, p2 in combinations(self.river_endpts, 2)]
+        )
         sinuosity = self.river_length / straight_dist
         sinuosity = max(1, sinuosity)  # ensure >= 1
         return sinuosity
@@ -374,7 +420,9 @@ class REMMaker(object):
             self.k = self.estimate_k()
         logging.info(f"Using k = {self.k} nearest neighbors.")
         # coords to interpolate over (don't interpolate where DEM is null or on centerline where REM = 0)
-        interp_indices = np.where(~(np.isnan(self.dem_array) | (self.centerline_array == 1)))
+        interp_indices = np.where(
+            ~(np.isnan(self.dem_array) | (self.centerline_array == 1))
+        )
         logging.info("Getting coords of points to interpolate.")
         c_interpolate = self.ix2coords(interp_indices)
         # create 2D tree
@@ -389,14 +437,20 @@ class REMMaker(object):
         interpolated_values = np.array([])
         for i, chunk in enumerate(np.array_split(c_interpolate, chunk_count)):
             logging.info(f"{i / chunk_count * 100:.2f}%")
-            distances, indices = tree.query(chunk, k=self.k, eps=self.eps, workers=self.workers)
+            distances, indices = tree.query(
+                chunk, k=self.k, eps=self.eps, workers=self.workers
+            )
             # interpolate (IDW with power = 1)
             weights = 1 / distances  # weight river elevations by 1 / distance
             weights = weights / weights.sum(axis=1).reshape(-1, 1)  # normalize weights
-            interpolated_values = np.append(interpolated_values, (weights * self.river_wses[indices]).sum(axis=1))
+            interpolated_values = np.append(
+                interpolated_values, (weights * self.river_wses[indices]).sum(axis=1)
+            )
         # create interpolated WSE array as elevations along centerline, nans everywhere else
         logging.info("Created interpolated WSE array.")
-        self.wse_interp_array = np.where(self.centerline_array == 1, self.dem_array, np.nan)
+        self.wse_interp_array = np.where(
+            self.centerline_array == 1, self.dem_array, np.nan
+        )
         # add the interpolated eleation values
         self.wse_interp_array[interp_indices] = interpolated_values
         return
@@ -407,7 +461,9 @@ class REMMaker(object):
         self.rem_array = self.dem_array - self.wse_interp_array
         self.rem_ras = os.path.join(self.out_dir, f"{self.dem_name}_REM.tif")
         # set nans back to nodata value
-        self.rem_array = np.where(np.isnan(self.rem_array), self.nodata_val, self.rem_array)
+        self.rem_array = np.where(
+            np.isnan(self.rem_array), self.nodata_val, self.rem_array
+        )
         # make copy of DEM raster
         r = gdal.Open(self.dem, gdal.GA_ReadOnly)
         driver = gdal.GetDriverByName("GTiff")
@@ -434,7 +490,16 @@ class REMMaker(object):
         self.clean_up()
         return self.rem_ras
 
-    def make_rem_viz(self, cmap='mako_r', z=4, blend_percent=25, make_png=True, make_kmz=False, *args, **kwargs):
+    def make_rem_viz(
+        self,
+        cmap="mako_r",
+        z=4,
+        blend_percent=25,
+        make_png=True,
+        make_kmz=False,
+        *args,
+        **kwargs,
+    ):
         """Create REM visualization by blending the REM color-relief with a DEM hillshade to make a pretty finished
         product.
 
@@ -459,13 +524,27 @@ class REMMaker(object):
         dem_viz = RasterViz(self.dem, out_dir=self.cache_dir, out_ext=".tif")
         dem_viz.make_hillshade(multidirectional=True, z=z)
         # make color-relief of REM in cache dir
-        rem_viz = RasterViz(self.rem_ras, out_dir=self.cache_dir, out_ext=".tif", make_png=make_png, make_kmz=make_kmz, *args, **kwargs)
+        rem_viz = RasterViz(
+            self.rem_ras,
+            out_dir=self.cache_dir,
+            out_ext=".tif",
+            make_png=make_png,
+            make_kmz=make_kmz,
+            *args,
+            **kwargs,
+        )
         rem_viz.make_color_relief(cmap=cmap, log_scale=True, *args, **kwargs)
         # switch output location from cache to output directory for hillshade-color raster/png
-        rem_viz.out_rasters["hillshade-color"] = os.path.join(self.out_dir, f"{self.dem_name}_hillshade-color.tif")
-        rem_viz.hillshade_ras = dem_viz.hillshade_ras  # use hillshade of original DEM, color-relief of REM
+        rem_viz.out_rasters["hillshade-color"] = os.path.join(
+            self.out_dir, f"{self.dem_name}_hillshade-color.tif"
+        )
+        rem_viz.hillshade_ras = (
+            dem_viz.hillshade_ras
+        )  # use hillshade of original DEM, color-relief of REM
         rem_viz.viz_srs = rem_viz.proj  # make png visualization using source projection
-        viz_ras = rem_viz.make_hillshade_color(blend_percent=blend_percent, *args, **kwargs)
+        viz_ras = rem_viz.make_hillshade_color(
+            blend_percent=blend_percent, *args, **kwargs
+        )
         self.clean_up()
         return viz_ras
 
@@ -489,18 +568,26 @@ if __name__ == "__main__":
         dem = argv[-1]
         maker_kwargs = {}
         viz_kwargs = {}
-        type_dict = {'centerline_shp': str, 'interp_pts': int, 'k': int, 'eps': float, 'workers': int,
-                     'cmap': str, 'z': float, 'blend_percent': float}
+        type_dict = {
+            "centerline_shp": str,
+            "interp_pts": int,
+            "k": int,
+            "eps": float,
+            "workers": int,
+            "cmap": str,
+            "z": float,
+            "blend_percent": float,
+        }
         for i, arg in enumerate(argv):
-            if arg in ['-centerline_shp', '-interp_pts', '-k', '-eps', '-workers']:
-                k = arg.replace('-', '')
-                maker_kwargs[k] = type_dict[k](argv[i+1])
-            if arg in ['-cmap', '-z', '-blend_percent']:
-                k = arg.replace('-', '')
-                viz_kwargs[k] = type_dict[k](argv[i+1])
+            if arg in ["-centerline_shp", "-interp_pts", "-k", "-eps", "-workers"]:
+                k = arg.replace("-", "")
+                maker_kwargs[k] = type_dict[k](argv[i + 1])
+            if arg in ["-cmap", "-z", "-blend_percent"]:
+                k = arg.replace("-", "")
+                viz_kwargs[k] = type_dict[k](argv[i + 1])
         rem_maker = REMMaker(dem=dem, **maker_kwargs)
         rem_maker.make_rem()
         rem_maker.make_rem_viz(**viz_kwargs)
 
     end = time.time()
-    logging.info(f'\nDone.\nRan in {end - start:.0f} s.')
+    logging.info(f"\nDone.\nRan in {end - start:.0f} s.")
