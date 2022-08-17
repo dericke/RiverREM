@@ -101,9 +101,9 @@ class RasterViz(object):
         self.cache_dir = cache_dir
         # call gdal from shell (faster) or Python bindings (easier install)
         self.shell = shell
-        # ref working directory in windows or linux
-        pwd = "%cd%" if sys.platform == "win32" else "$(pwd)"
         if docker_run and shell:
+            # ref working directory in windows or linux
+            pwd = "%cd%" if sys.platform == "win32" else "$(pwd)"
             # docker run string to call a command in the osgeo/gdal container
             self.drun = f"docker run -v {pwd}:/data osgeo/gdal "
             # docker path for mounted pwd volume
@@ -142,10 +142,16 @@ class RasterViz(object):
                           "color-relief": self.make_color_relief,
                           "hillshade-color": self.make_hillshade_color}
         # names for intermediate and output rasters
-        self.intermediate_rasters = {viz: os.path.join(self.cache_dir, f"intermediate_{viz}{self.ext}")
-                                     for viz in self.viz_types.keys()}
-        self.out_rasters = {viz: os.path.join(self.out_dir, f"{self.dem_name}_{viz}{self.ext}")
-                            for viz in self.viz_types.keys()}
+        self.intermediate_rasters = {
+            viz: os.path.join(self.cache_dir, f"intermediate_{viz}{self.ext}")
+            for viz in self.viz_types
+        }
+
+        self.out_rasters = {
+            viz: os.path.join(self.out_dir, f"{self.dem_name}_{viz}{self.ext}")
+            for viz in self.viz_types
+        }
+
         # for hillshade-color, keep track of hillshade and color-relief
         self.hillshade_ras = self.out_rasters["hillshade"]
         self.color_relief_ras = self.out_rasters["color-relief"]
@@ -282,7 +288,7 @@ class RasterViz(object):
             scale = f"-s {self.scale}" if self.scale != 1 else ""
             light_source = "-multidirectional" if multidirectional else f"-az {azim} -alt {alt}"
             cmd = f"{self.drun}gdaldem hillshade {self.dp}{self.dem} {self.dp}{temp_path} " \
-                  f"{z_fact} {scale} {light_source} -of {self.out_format}"
+                      f"{z_fact} {scale} {light_source} -of {self.out_format}"
             subprocess.run(cmd, shell=True, stderr=subprocess.PIPE)
         else:
             options = {"zFactor": z, "format": self.out_format}
@@ -310,7 +316,7 @@ class RasterViz(object):
         if self.shell:
             scale = f"-s {self.scale}" if self.scale != 1 else ""
             cmd = f"{self.drun}gdaldem slope {self.dp}{self.dem} {self.dp}{temp_path} " \
-                  f"{scale} -of {self.out_format}"
+                      f"{scale} -of {self.out_format}"
             subprocess.run(cmd, shell=True, stderr=subprocess.PIPE)
         else:
             options = {"format": self.out_format}
@@ -332,7 +338,7 @@ class RasterViz(object):
         out_path = self.out_rasters["aspect"]
         if self.shell:
             cmd = f"{self.drun}gdaldem aspect {self.dp}{self.dem} {self.dp}{temp_path} " \
-                  f"-of {self.out_format}"
+                      f"-of {self.out_format}"
             subprocess.run(cmd, shell=True, stderr=subprocess.PIPE)
         else:
             gdal.DEMProcessing(f"{self.dp}{temp_path}", f"{self.dp}{self.dem}", "aspect", format=self.out_format)
@@ -351,7 +357,7 @@ class RasterViz(object):
         out_path = self.out_rasters["roughness"]
         if self.shell:
             cmd = f"{self.drun}gdaldem roughness {self.dp}{self.dem} {self.dp}{temp_path} " \
-                  f"-of {self.out_format}"
+                      f"-of {self.out_format}"
             subprocess.run(cmd, shell=True, stderr=subprocess.PIPE)
         else:
             gdal.DEMProcessing(f"{self.dp}{temp_path}", f"{self.dp}{self.dem}", "Roughness", format=self.out_format)
@@ -378,7 +384,7 @@ class RasterViz(object):
         cmap_txt = self.get_cmap_txt(cmap, log_scale=log_scale)
         if self.shell:
             cmd = f"{self.drun}gdaldem color-relief {self.dp}{self.dem} {self.dp}{cmap_txt} {self.dp}{temp_path} " \
-                    f"-of {self.out_format}"
+                        f"-of {self.out_format}"
             subprocess.run(cmd, shell=True, stderr=subprocess.PIPE)
         else:
             gdal.DEMProcessing(f"{self.dp}{temp_path}", f"{self.dp}{self.dem}", "color-relief", colorFilename=cmap_txt,
@@ -481,7 +487,7 @@ class RasterViz(object):
         ras = gdal.Open(self.dem, gdal.GA_ReadOnly)
         proj = osr.SpatialReference(wkt=ras.GetProjection())
         epsg_code = proj.GetAttrValue('AUTHORITY', 1)
-        epsg_code = "EPSG:" + epsg_code if epsg_code is not None else None
+        epsg_code = f"EPSG:{epsg_code}" if epsg_code is not None else None
         h_unit = proj.GetAttrValue('UNIT')
         if epsg_code is None or h_unit is None:
             print("WARNING: CRS metadata is missing for input DEM.")
@@ -519,7 +525,7 @@ class RasterViz(object):
             tmp_path = os.path.join(self.cache_dir, f"tmp_3857{self.ext}")
             if self.shell:
                 cmd = f"{self.drun}gdalwarp " \
-                      f"-t_srs {self.viz_srs} {self.dp}{ras_path} {self.dp}{tmp_path}"
+                          f"-t_srs {self.viz_srs} {self.dp}{ras_path} {self.dp}{tmp_path}"
                 subprocess.run(cmd, shell=True, stderr=subprocess.PIPE)
             else:
                 gdal.Warp(f"{self.dp}{tmp_path}", f"{self.dp}{ras_path}", dstSRS=self.viz_srs)
@@ -529,7 +535,7 @@ class RasterViz(object):
         scale = self.get_scaling(tmp_path)
         if self.shell:
             cmd = f"{self.drun}gdal_translate -ot Byte{scale} -a_nodata 0 -of PNG " \
-                  f"{self.dp}{tmp_path} {self.dp}{png_name}"
+                      f"{self.dp}{tmp_path} {self.dp}{png_name}"
             subprocess.run(cmd, shell=True, stderr=subprocess.PIPE)
         else:
             gdal.Translate(f"{self.dp}{png_name}", f"{self.dp}{tmp_path}",
@@ -553,25 +559,22 @@ class RasterViz(object):
     @staticmethod
     def get_scaling(ras_name):
         """Get scaling string for gdal_translate call when converting to Byte array for png/kmz outputs"""
-        # color-relief and hillshade-color already have 0-255 color range, don't change
         if "color" in ras_name:
-            scale = ""
-        else:
-            ras = gdal.Open(ras_name, gdal.GA_ReadOnly)
-            band = ras.GetRasterBand(1)
-            band.ComputeStatistics(0)
-            min_val = band.GetMinimum()
-            max_val = band.GetMaximum()
+            return ""
+        ras = gdal.Open(ras_name, gdal.GA_ReadOnly)
+        band = ras.GetRasterBand(1)
+        band.ComputeStatistics(0)
+        min_val = band.GetMinimum()
+        max_val = band.GetMaximum()
             # set output range to start at 1, so we don't erroneously set low values to nodata (0 for byte array)
-            scale = f" -scale {min_val} {max_val} 1 255"
-        return scale
+        return f" -scale {min_val} {max_val} 1 255"
 
     def _clean_up(self):
         """Delete all intermediate files. Called by _png_kmz_checker decorator at end of function calls."""
         int_files = [*self.intermediate_rasters.values(),
                      os.path.join(self.cache_dir, f"tmp_3857{self.ext}"),
                      os.path.join(self.cache_dir, f"{self.dem_name}_cmap.txt")]
-        int_files += [f + ".aux.xml" for f in int_files]
+        int_files += [f"{f}.aux.xml" for f in int_files]
         for f in int_files:
             if os.path.exists(f):
                 os.remove(f)
@@ -593,10 +596,10 @@ if __name__ == "__main__":
         for i, arg in enumerate(argv):
             if arg == "-out_ext":
                 out_ext = ".img" if argv[i+1] == "img" else ".tif"
-        make_png = True if ("-make_png" in argv) else False
-        make_kmz = True if ("-make_kmz" in argv) else False
-        docker_run = True if ("-docker" in argv) else False
-        shell = True if ("-shell" in argv) else False
+        make_png = "-make_png" in argv
+        make_kmz = "-make_kmz" in argv
+        docker_run = "-docker" in argv
+        shell = "-shell" in argv
         # instantiate RasterViz object
         viz = RasterViz(dem=dem, out_ext=out_ext, make_png=make_png, make_kmz=make_kmz,
                         docker_run=docker_run, shell=shell)
