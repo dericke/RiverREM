@@ -154,9 +154,8 @@ class REMMaker(object):
 
     @centerline_shp.setter
     def centerline_shp(self, centerline_shp):
-        if centerline_shp is not None:
-            if not self.valid_input(centerline_shp):
-                raise FileNotFoundError(f"Cannot find input river centerline shapefile: {centerline_shp}")
+        if centerline_shp is not None and not self.valid_input(centerline_shp):
+            raise FileNotFoundError(f"Cannot find input river centerline shapefile: {centerline_shp}")
         self._centerline_shp = centerline_shp
 
     @property
@@ -245,7 +244,7 @@ class REMMaker(object):
         self.rivers['river_name'] = names
         # get unique names
         river_names = set(names)
-        if len(river_names) == 0:
+        if not river_names:
             raise Exception("Found river, but it does not have a listed name. Ensure the target river segment(s) "
                             "have a \"name\" tag: \n\thttps://www.openstreetmap.org/edit")
         logging.info(f"Found river(s): {', '.join(river_names)}")
@@ -344,7 +343,10 @@ class REMMaker(object):
 
     def get_sinuosity(self):
         """Estimate sinuosity of the river using river centerline(s) length / distance between line endpoints"""
-        straight_dist = max([p1.distance(p2) for p1, p2 in combinations(self.river_endpts, 2)])
+        straight_dist = max(
+            p1.distance(p2) for p1, p2 in combinations(self.river_endpts, 2)
+        )
+
         sinuosity = self.river_length / straight_dist
         sinuosity = max(1, sinuosity)  # ensure >= 1
         return sinuosity
